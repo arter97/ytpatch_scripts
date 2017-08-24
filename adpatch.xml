@@ -1,0 +1,13 @@
+#!/bin/bash
+
+echo Patching "$@"
+echo "android:layout_height=
+android:layout_margin=
+android:layout_marginBottom=
+android:layout_marginEnd=
+android:layout_marginLeft=
+android:layout_marginRight=
+android:layout_marginStart=
+android:layout_marginTop=
+android:layout_width=" | while read text; do cat "$@" | tr ' ' '\n' | sed -e 's/</ /g' -e 's/>/ /g' -e 's/ //g' | grep $text | while read grepped; do
+sed -i -e "s#$grepped#${text}\"0.0dip\"#g" "$@"; done; done

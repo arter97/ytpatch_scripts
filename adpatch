@@ -1,0 +1,153 @@
+#!/bin/bash
+
+AD_DISP=$(find smali* -type f -exec grep -l "isDisplayAdAllowed" {} +)
+if echo $AD_DISP | grep -q " "; then
+    # Multiple classes detected, bail out
+    echo "Multiple AD_DISP classes detected!"
+    echo $AD_DISP
+    exit 1
+fi
+echo -n "AD_DISP detected : "
+echo $AD_DISP
+
+AD_DISP_LINE=$(grep -n "isDisplayAdAllowed" $AD_DISP | cut -f1 -d: | head -n1)
+sed -i "$((${AD_DISP_LINE} + 2)),$((${AD_DISP_LINE} + 6))d" $AD_DISP
+sed -i "$((${AD_DISP_LINE} + 2))i\    sget-object v1, Ljava\/lang\/Boolean;->FALSE:Ljava\/lang\/Boolean;\n\n    invoke-virtual {v1}, Ljava\/lang\/Boolean;->booleanValue()Z\n\n    move-result v1" $AD_DISP
+
+echo "$AD_DISP patched!"
+
+AD_CREATOR=$(grep -l "final A" \
+           $(grep -l "public static final CREATOR" \
+           $(find smali* -type f -exec \
+             grep -l ".method public constructor <init>(Ljava/util/List;" {} +)))
+if echo $AD_CREATOR | grep -q " "; then
+    # Multiple classes detected, bail out
+    echo "Multiple AD_CREATOR classes detected!"
+    echo $AD_CREATOR
+    exit 1
+fi
+echo -n "AD_CREATOR detected : "
+echo $AD_CREATOR
+
+AD_CREATOR_LINE=$(grep -n ".method public constructor <init>(Ljava/util/List;" $AD_CREATOR | cut -f1 -d:)
+sed -i "$((${AD_CREATOR_LINE} + 2))i\    .param p1" $AD_CREATOR
+if ! sed -n "${AD_CREATOR_LINE},$((${AD_CREATOR_LINE} + 10))p" $AD_CREATOR | grep -q "invoke-direct {p0}, Ljava/lang/Object;-><init>()V"; then
+    # "invoke-direct {p0}, Ljava/lang/Object;-><init>()V" not found
+    echo "invoke-direct {p0}, Ljava/lang/Object;-><init>()V not found!"
+    exit 1
+fi
+
+sed -i "${AD_CREATOR_LINE},$((${AD_CREATOR_LINE} + 10))s/invoke-direct {p0}, Ljava\/lang\/Object;-><init>()V/invoke-direct {p0}, Ljava\/lang\/Object;-><init>()V\n    invoke-static {}, Ljava\/util\/Collections;->emptyList()Ljava\/util\/List;\n    move-result-object p1/" $AD_CREATOR
+
+echo "$AD_CREATOR patched!"
+
+AD_EXT=$(find smali* -type f -exec \
+             grep -l "/VAST/Ad/Wrapper/Extensions/Extension" {} +)
+if echo $AD_EXT | grep -q " "; then
+    # Multiple classes detected, bail out
+    echo "Multiple AD_EXT classes detected!"
+    echo $AD_EXT
+    exit 1
+fi
+echo -n "AD_EXT detected : "
+echo $AD_EXT
+
+AD_EXT_TEXT=$(cat $AD_EXT | grep ".method public static")
+AD_EXT_LINE=$(grep -n ".method public static" $AD_EXT | cut -f1 -d:)
+sed -i '/.method public static/,/.end method/ d' $AD_EXT
+sed -i "${AD_EXT_LINE}i\\${AD_EXT_TEXT}\n    .locals 3\n    .prologue\n    return-void\n.end method" $AD_EXT
+
+echo "$AD_EXT patched!"
+
+AD_DB1=$(find smali* -type f -exec \
+             grep -l "CREATE TABLE ad_videos" {} +)
+if echo $AD_DB1 | grep -q " "; then
+    # Multiple classes detected, bail out
+    echo "Multiple AD_DB1 classes detected!"
+    echo $AD_DB1
+    exit 1
+fi
+echo -n "AD_DB1 detected : "
+echo $AD_DB1
+
+echo "CREATE TABLE adbreaks
+CREATE TABLE ads
+CREATE INDEX idx_ad_video_id_original_video_id
+CREATE TABLE ad_videos" | while read text; do
+  AD_DB1_TEXT=$(cat $AD_DB1 | grep "$text")
+  AD_DB1_LINE=$(grep -n "$text" $AD_DB1 | cut -f1 -d:)
+  echo "$text : $AD_DB1_LINE"
+  sed -i "$((${AD_DB1_LINE})),$((${AD_DB1_LINE} + 2))d" $AD_DB1
+done
+
+echo "$AD_DB1 patched!"
+
+find smali* -type f -exec grep -l '"ads"' {} + | while read file; do
+  while cat $file | grep -q '"ads"'; do
+    UUID=$(uuidgen)
+    echo "Replacing ads with $UUID in $file"
+    sed -i -e "0,/\"ads\"/s//\"$UUID\"/" $file
+  done
+done
+
+find smali* -type f -exec grep -l "\bad_video" {} + | while read file; do
+  while cat $file | grep -q "\bad_video"; do
+    UUID=$(uuidgen)
+    echo "Replacing ad_video with $UUID in $file"
+    sed -i -e "0,/\bad_video/s//$UUID/" $file
+  done
+done
+
+AD_RES=$(find smali* -type f -exec \
+             grep -l "YT:ADSENSE" {} +)
+if echo $AD_RES | grep -q " "; then
+    # Multiple classes detected, bail out
+    echo "Multiple AD_RES classes detected!"
+    echo $AD_RES
+    exit 1
+fi
+echo -n "AD_RES detected : "
+echo $AD_RES
+
+AD_RES_LINE=$(grep -n "adVideoId" $AD_RES | cut -f1 -d:)
+echo "adVideoID : $AD_RES_LINE"
+grep -n "if-eqz" $AD_RES | cut -f1 -d: | while read num; do
+  if [ $num -lt $AD_RES_LINE ]; then
+    echo $num
+  fi
+done | tail -n1 | while read line; do
+  echo "Replacing $line in $AD_RES"
+  AD_RES_COND=$(sed -n ${line}p $AD_RES | awk '{print $3}')
+  sed -i "${line}s/.*/    goto $AD_RES_COND/" $AD_RES
+done
+
+echo "$AD_RES patched!"
+
+echo "Patching XMLs"
+echo "custom_debug_ad_break
+debug_offline_ad_entry
+debug_offline_ad_layout
+debug_offline_ad_video_entry
+debug_online_ads
+default_ad_overlay
+embedded_ad_overlay
+inline_ad_overlay
+mdx_ad_overlay
+watch_metadata_cards
+promo
+shopping
+info_cards_teaser_overlay
+invideo_programming_overlay" | while read to_find; do find res -name "*${to_find}*.xml"; done | sort | parallel ~/arter97/bin-x86/adpatch.xml
+
+cp -rp res tmp
+cd tmp
+# set to false
+echo "show_startup_promo
+enable_channel_layer_banner
+generic_promo_banner_view" | while read bool; do find . -name bools.xml -exec grep -l $bool {} + | while read file; do sed -i -e "s#$(cat ../res/$file | grep $bool)#$(cat ../res/$file | grep $bool | sed -e s/true/false/g)#g" $file; done; done
+# set to true
+echo "supports_rtl" | while read bool; do find . -name bools.xml -exec grep -l $bool {} + | while read file; do sed -i -e "s#$(cat ../res/$file | grep $bool)#$(cat ../res/$file | grep $bool | sed -e s/false/true/g)#g" $file; done; done
+cd ..
+rm -rf res
+mv tmp res
+echo "XMLs patched!"
